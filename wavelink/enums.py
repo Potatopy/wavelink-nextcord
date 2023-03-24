@@ -1,7 +1,6 @@
-"""
-MIT License
+"""MIT License
 
-Copyright (c) 2019-Present PythonistaGuild
+Copyright (c) 2019-2021 PythonistaGuild
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,37 +20,32 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
-from nextcord.enums import Enum
 
-__all__ = ('NodeStatus', 'TrackSource', 'LoadType', 'TrackEventType')
+from __future__ import annotations
 
-
-class NodeStatus(Enum):
-
-    DISCONNECTED = 0
-    CONNECTING = 1
-    CONNECTED = 2
+from typing import TYPE_CHECKING
 
 
-class TrackSource(Enum):
+if TYPE_CHECKING:
+    from enum import Enum
+else:
+    from nextcord import Enum
 
-    YouTube = 0
-    YouTubeMusic = 1
-    SoundCloud = 2
-    Local = 3
-    Unknown = 4
+__all__ = (
+    "ErrorSeverity",
+    "LoadType",
+)
+
+
+class ErrorSeverity(Enum):
+    common = "COMMON"
+    suspicious = "SUSPICIOUS"
+    fault = "FAULT"
 
 
 class LoadType(Enum):
-
     track_loaded = "TRACK_LOADED"
     playlist_loaded = "PLAYLIST_LOADED"
     search_result = "SEARCH_RESULT"
     no_matches = "NO_MATCHES"
     load_failed = "LOAD_FAILED"
-
-
-class TrackEventType(Enum):
-
-    START = 'TrackStartEvent'
-    END = 'TrackEndEvent'

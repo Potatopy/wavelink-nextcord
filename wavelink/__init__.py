@@ -1,7 +1,6 @@
-"""
-MIT License
+"""MIT License
 
-Copyright (c) 2019-Present PythonistaGuild
+Copyright (c) 2019-2022 PythonistaGuild
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,17 +20,21 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
+
 __title__ = "WaveLink"
 __author__ = "PythonistaGuild, EvieePy"
 __license__ = "MIT"
-__copyright__ = "Copyright 2019-Present (c) PythonistaGuild, EvieePy"
-__version__ = "2.0.4"
+__copyright__ = "Copyright 2019-2022 (c) PythonistaGuild, EvieePy"
+__version__ = "1.0.0"
 
+
+from .backoff import Backoff
 from .enums import *
-from .exceptions import *
-from .node import *
-from .payloads import *
-from .player import Player as Player
+from .errors import *
+from .player import *
+from .pool import *
+from .stats import Stats
 from .tracks import *
 from .queue import *
+from . import abc as abc
 from .filters import *

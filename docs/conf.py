@@ -16,7 +16,6 @@
 
 
 # -- Project information -----------------------------------------------------
-import re
 import os
 import sys
 
@@ -30,9 +29,7 @@ copyright = "2022, PythonistaGuild, EvieePy"
 author = "PythonistaGuild, EvieePy"
 
 # The full version, including alpha/beta/rc tags
-release = ''
-with open('../wavelink/__init__.py') as f:
-    release = re.search(r'^__version__\s*=\s*[\'"]([^\'"]*)[\'"]', f.read(), re.MULTILINE).group(1)  # type: ignore
+release = "1.0.0"
 
 # -- General configuration ---------------------------------------------------
 
@@ -42,7 +39,6 @@ with open('../wavelink/__init__.py') as f:
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.extlinks",
-    "sphinx.ext.napoleon",
     "sphinxcontrib.asyncio",
     "sphinx.ext.intersphinx",
     "attributetable",
@@ -78,8 +74,12 @@ html_static_path = ["_static"]
 
 # These paths are either relative to html_static_path
 # or fully qualified paths (eg. https://...)
-html_css_files = ["styles/furo.css"]
-html_js_files = ["js/custom.js"]
+html_css_files = ["css/custom.css"]
+
+if on_rtd:
+    extensions.append("sphinxcontrib.napoleon")
+else:
+    extensions.append("sphinx.ext.napoleon")
 
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True

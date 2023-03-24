@@ -1,6 +1,6 @@
 """MIT License
 
-Copyright (c) 2019-Present PythonistaGuild
+Copyright (c) 2019-2022 PythonistaGuild
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import abc
 import collections
-from typing import Any
+from typing import Any, Dict, List, Optional, Tuple
 
 
 __all__ = (
@@ -45,7 +45,7 @@ __all__ = (
 
 class BaseFilter(abc.ABC):
 
-    def __init__(self, name: str | None = None) -> None:
+    def __init__(self, name: Optional[str] = None) -> None:
         self.name: str = name or "Unknown"
 
     def __repr__(self) -> str:
@@ -72,7 +72,7 @@ class Equalizer(BaseFilter):
         self,
         name: str = "CustomEqualizer",
         *,
-        bands: list[tuple[int, float]]
+        bands: List[Tuple[int, float]]
     ) -> None:
         super().__init__(name=name)
 
@@ -88,7 +88,7 @@ class Equalizer(BaseFilter):
         return f"<wavelink.Equalizer name={self.name}>"
 
     @property
-    def _payload(self) -> list[dict[str, float]]:
+    def _payload(self) -> List[Dict[str, float]]:
         return self.bands
 
     @classmethod
@@ -175,7 +175,7 @@ class Karaoke(BaseFilter):
                f"filter_band={self.filter_band}, filter_width={self.filter_width}>"
 
     @property
-    def _payload(self) -> dict[str, float]:
+    def _payload(self) -> Dict[str, float]:
         return {
             "level":       self.level,
             "monoLevel":   self.mono_level,
@@ -226,7 +226,7 @@ class Timescale(BaseFilter):
         return f"<wavelink.Timescale speed={self.speed}, pitch={self.pitch}, rate={self.rate}>"
 
     @property
-    def _payload(self) -> dict[str, float]:
+    def _payload(self) -> Dict[str, float]:
         return {
             "speed": self.speed,
             "pitch": self.pitch,
@@ -270,7 +270,7 @@ class Tremolo(BaseFilter):
         return f"<wavelink.Tremolo frequency={self.frequency}, depth={self.depth}>"
 
     @property
-    def _payload(self) -> dict[str, float]:
+    def _payload(self) -> Dict[str, float]:
         return {
             "frequency": self.frequency,
             "depth":     self.depth
@@ -313,7 +313,7 @@ class Vibrato(BaseFilter):
         return f"<wavelink.Vibrato frequency={self.frequency}, depth={self.depth}>"
 
     @property
-    def _payload(self) -> dict[str, float]:
+    def _payload(self) -> Dict[str, float]:
         return {
             "frequency": self.frequency,
             "depth":     self.depth
@@ -342,7 +342,7 @@ class Rotation(BaseFilter):
         return f"<wavelink.Rotation speed={self.speed}>"
 
     @property
-    def _payload(self) -> dict[str, float]:
+    def _payload(self) -> Dict[str, float]:
         return {
             "rotationHz": self.speed,
         }
@@ -383,7 +383,7 @@ class Distortion(BaseFilter):
                f"scale={self.scale}>"
 
     @property
-    def _payload(self) -> dict[str, float]:
+    def _payload(self) -> Dict[str, float]:
         return {
             "sinOffset": self.sin_offset,
             "sinScale":  self.sin_scale,
@@ -451,7 +451,7 @@ class ChannelMix(BaseFilter):
                f"right_to_left={self.right_to_left}>"
 
     @property
-    def _payload(self) -> dict[str, float]:
+    def _payload(self) -> Dict[str, float]:
         return {
             "leftToLeft":   self.left_to_left,
             "leftToRight":  self.left_to_right,
@@ -520,7 +520,7 @@ class LowPass(BaseFilter):
         return f"<wavelink.LowPass smoothing={self.smoothing}>"
 
     @property
-    def _payload(self) -> dict[str, float]:
+    def _payload(self) -> Dict[str, float]:
         return {
             "smoothing": self.smoothing,
         }
@@ -559,30 +559,30 @@ class Filter:
 
     def __init__(
         self,
-        _filter: Filter | None = None,
+        _filter: Optional[Filter] = None,
         /, *,
-        equalizer: Equalizer | None = None,
-        karaoke: Karaoke | None = None,
-        timescale: Timescale | None = None,
-        tremolo: Tremolo | None = None,
-        vibrato: Vibrato | None = None,
-        rotation: Rotation | None = None,
-        distortion: Distortion | None = None,
-        channel_mix: ChannelMix | None = None,
-        low_pass: LowPass | None = None
+        equalizer: Optional[Equalizer] = None,
+        karaoke: Optional[Karaoke] = None,
+        timescale: Optional[Timescale] = None,
+        tremolo: Optional[Tremolo] = None,
+        vibrato: Optional[Vibrato] = None,
+        rotation: Optional[Rotation] = None,
+        distortion: Optional[Distortion] = None,
+        channel_mix: Optional[ChannelMix] = None,
+        low_pass: Optional[LowPass] = None
     ) -> None:
 
-        self.filter: Filter | None = _filter
+        self.filter: Optional[Filter] = _filter
 
-        self.equalizer: Equalizer | None = equalizer
-        self.karaoke: Karaoke | None = karaoke
-        self.timescale: Timescale | None = timescale
-        self.tremolo: Tremolo | None = tremolo
-        self.vibrato: Vibrato | None = vibrato
-        self.rotation: Rotation | None = rotation
-        self.distortion: Distortion | None = distortion
-        self.channel_mix: ChannelMix | None = channel_mix
-        self.low_pass: LowPass | None = low_pass
+        self.equalizer: Optional[Equalizer] = equalizer
+        self.karaoke: Optional[Karaoke] = karaoke
+        self.timescale: Optional[Timescale] = timescale
+        self.tremolo: Optional[Tremolo] = tremolo
+        self.vibrato: Optional[Vibrato] = vibrato
+        self.rotation: Optional[Rotation] = rotation
+        self.distortion: Optional[Distortion] = distortion
+        self.channel_mix: Optional[ChannelMix] = channel_mix
+        self.low_pass: Optional[LowPass] = low_pass
 
     def __repr__(self) -> str:
         return f"<wavelink.Filter equalizer={self.equalizer}, " \
@@ -591,7 +591,7 @@ class Filter:
                f"channel_mix={self.channel_mix}, low_pass={self.low_pass}>"
 
     @property
-    def _payload(self) -> dict[str, Any]:
+    def _payload(self) -> Dict[str, Any]:
 
         payload = self.filter._payload.copy() if self.filter else {}
 

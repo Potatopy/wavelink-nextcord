@@ -1,3 +1,1 @@
 aiohttp>=3.7.4,<4
-nextcord
-yarl~=1.8.2

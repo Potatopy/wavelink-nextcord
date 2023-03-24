@@ -1,7 +1,6 @@
-"""
-MIT License
+"""MIT License
 
-Copyright (c) 2019-Present PythonistaGuild
+Copyright (c) 2019-2021 PythonistaGuild
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -23,206 +22,191 @@ SOFTWARE.
 """
 from __future__ import annotations
 
-import abc
-from typing import TYPE_CHECKING, ClassVar, Literal, overload, Optional, Any
+from typing import (
+    TYPE_CHECKING,
+    ClassVar,
+    List,
+    Literal,
+    Optional,
+    Type,
+    TypeVar,
+    Union,
+    overload,
+)
 
-import aiohttp
 import yarl
 from nextcord.ext import commands
 
-from .enums import TrackSource
-from .exceptions import NoTracksError
-from .node import Node, NodePool
+from .abc import *
+from .pool import Node, NodePool
+from .utils import MISSING
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
+    from .ext import spotify
 
-    from .types.track import Track as TrackPayload
 
 __all__ = (
-    'Playable',
-    'Playlist',
-    'YouTubeTrack',
-    'GenericTrack',
-    'YouTubeMusicTrack',
-    'SoundCloudTrack',
-    'YouTubePlaylist'
+    "Track",
+    "SearchableTrack",
+    "YouTubeTrack",
+    "YouTubeMusicTrack",
+    "SoundCloudTrack",
+    "YouTubePlaylist",
+    "PartialTrack",
+    "LocalTrack"
 )
 
-
-_source_mapping: dict[str, TrackSource] = {
-    'youtube': TrackSource.YouTube
-}
+ST = TypeVar("ST", bound="SearchableTrack")
 
 
-class Playlist(metaclass=abc.ABCMeta):
-    """An ABC that defines the basic structure of a lavalink playlist resource.
+class Track(Playable):
+    """A Lavalink track object.
 
     Attributes
-    ----------
-    data: Dict[str, Any]
-        The raw data supplied by Lavalink.
-    """
-
-    def __init__(self, data: dict[str, Any]):
-        self.data: dict[str, Any] = data
-
-
-class Playable(metaclass=abc.ABCMeta):
-    """Base ABC Track used in all the Wavelink Track types.
-
-    Attributes
-    ----------
-    data: dict[str, Any]
-        The raw data received via Lavalink.
-    encoded: str
-        The encoded Track string.
-    is_seekable: bool
-        Whether the Track is seekable.
-    is_stream: bool
-        Whether the Track is a stream.
-    length: int
-        The length of the track in milliseconds.
-    duration: int
-        An alias for length.
-    position: int
-        The position the track will start in milliseconds. Defaults to 0.
+    ------------
+    id: str
+        The Base64 Track ID, can be used to rebuild track objects.
+    info: Dict[str, Any]
+        The raw track info.
     title: str
-        The Track title.
-    source: :class:`TrackSource`
-        The source this Track was fetched from.
-    uri: Optional[str]
-        The URI of this track. Could be None.
-    author: Optional[str]
-        The author of this track. Could be None.
+        The track title.
     identifier: Optional[str]
-        The Youtube/YoutubeMusic identifier for this track. Could be None.
+        The tracks identifier. could be None depending on track type.
+    length:
+        The duration of the track in seconds.
+    duration:
+        Alias to ``length``.
+    uri: Optional[str]
+        The tracks URI. Could be None.
+    author: Optional[str]
+        The author of the track. Could be None
     """
 
-    PREFIX: ClassVar[str] = ''
-    
-    def __init__(self, data: TrackPayload) -> None:
-        self.data: TrackPayload = data
-        self.encoded: str = data['encoded']
+    def __init__(self, id: str, info: dict):
+        super().__init__(id, info)
+        self.title: str = info.get('title')
+        self.identifier: Optional[str] = info.get("identifier")
+        self.uri: Optional[str] = info.get("uri")
+        self.author: Optional[str] = info.get("author")
 
-        info = data['info']
-        self.is_seekable: bool = info.get('isSeekable', False)
-        self.is_stream: bool = info.get('isStream', False)
-        self.length: int = info.get('length', 0)
-        self.duration: int = self.length
-        self.position: int = info.get('position', 0)
-
-        self.title: str = info.get('title', 'Unknown Title')
-
-        source: str | None = info.get('sourceName')
-        self.source: TrackSource = _source_mapping.get(source, TrackSource.Unknown)
-
-        self.uri: str | None = info.get('uri')
-        self.author: str | None = info.get('author')
-        self.identifier: str | None = info.get('identifier')
+        self._stream: bool = info.get("isStream")  # type: ignore
+        self._dead: bool = False
 
     def __str__(self) -> str:
         return self.title
 
-    def __repr__(self) -> str:
-        return f'Playable: source={self.source}, title={self.title}'
+    def is_stream(self) -> bool:
+        """Indicates whether the track is a stream or not."""
+        return self._stream
 
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, Playable):
-            return self.encoded == other.encoded
-        return NotImplemented
-    
+
+class SearchableTrack(Track, Searchable):
+
+    _search_type: ClassVar[str]
+
     @overload
     @classmethod
-    async def search(cls,
-                     query: str,
-                     /,
-                     *,
-                     return_first: Literal[False] = ...,
-                     node: Node | None = ...
-                     ) -> list[Self]:
+    async def search(
+            cls: Type[ST],
+            query: str,
+            *,
+            node: Node = ...,
+            type: spotify.SpotifySearchType = ...,
+            return_first: Literal[False] = ...,
+    ) -> List[ST]:
         ...
 
     @overload
     @classmethod
-    async def search(cls,
-                     query: str,
-                     /,
-                     *,
-                     return_first: Literal[True] = ...,
-                     node: Node | None = ...
-                     ) -> Self:
+    async def search(
+            cls: Type[ST],
+            query: str,
+            *,
+            node: Node = ...,
+            type: spotify.SpotifySearchType = ...,
+            return_first: Literal[True] = ...,
+    ) -> Optional[ST]:
         ...
 
     @overload
     @classmethod
-    async def search(cls,
-                     query: str,
-                     /,
-                     *,
-                     return_first: bool = ...,
-                     node: Node | None = ...
-                     ) -> Self | list[Self]:
+    async def search(
+        cls: Type[ST],
+        query: str,
+        *,
+        node: Node = ...,
+        return_first: Literal[False] = ...,
+    ) -> List[ST]:
         ...
 
     @overload
     @classmethod
-    async def search(cls,
-                     query: str,
-                     /,
-                     *,
-                     return_first: bool = ...,
-                     node: Node | None = ...
-                     ) -> YouTubePlaylist:
+    async def search(
+        cls: Type[ST],
+        query: str,
+        *,
+        node: Node = ...,
+        return_first: Literal[True] = ...,
+    ) -> Optional[ST]:
         ...
 
     @classmethod
-    async def search(cls,
-                     query: str,
-                     /,
-                     *,
-                     return_first: bool = False,
-                     node: Node | None = None
-                     ) -> Self | list[Self]:
-        """Search and retrieve tracks for the given query.
+    async def search(
+        cls: Type[ST],
+            query: str,
+            *,
+            type: spotify.SpotifySearchType = None,
+            node: Node = MISSING,
+            return_first: bool = False
+    ) -> Union[Optional[ST], List[ST]]:
+        """|coro|
+
+        Search for tracks with the given query.
 
         Parameters
         ----------
         query: str
-            The query to search for.
+            The song to search for.
+        spotify_type: Optional[:class:`spotify.SpotifySearchType`]
+            An optional enum value to use when searching with Spotify.
+        node: Optional[:class:`wavelink.Node`]
+            An optional Node to use to make the search with.
         return_first: Optional[bool]
-            Whether to return the first track from the search results. Defaults to False.
-        node: Optional[:class:`Node`]
-            The node to use when searching for tracks. If no :class:`Node` is passed,
-            one will be fetched via the :class:`NodePool`.
+            An optional bool which when set to True will return only the first track found. Defaults to False.
+            Use this as True, when searching with LocalTrack.
+
+        Returns
+        -------
+        Union[Optional[Track], List[Track]]
         """
+        if node is MISSING:
+            node = NodePool.get_node()
 
         check = yarl.URL(query)
 
         if str(check.host) == 'youtube.com' or str(check.host) == 'www.youtube.com' and check.query.get("list") or \
-                cls.PREFIX == 'ytpl:':
+                cls._search_type == 'ytpl':
 
-            playlist = await NodePool.get_playlist(query, cls=YouTubePlaylist, node=node)
-            return playlist
+            tracks = await node.get_playlist(cls=YouTubePlaylist, identifier=query)
+        elif cls._search_type == 'local':
+            tracks = await node.get_tracks(cls, query)
         else:
-            tracks = await NodePool.get_tracks(f'{cls.PREFIX}{query}', cls=cls, node=node)
-        
-        try:
-            track = tracks[0]
-        except IndexError:
-            raise NoTracksError(f'Your search query "{query}" returned no tracks.')
+            tracks = await node.get_tracks(cls, f"{cls._search_type}:{query}")
 
         if return_first:
-            return track
+            return tracks[0]
 
         return tracks
 
     @classmethod
-    async def convert(cls, ctx: commands.Context, argument: str) -> Self:
+    async def convert(cls: Type[ST], ctx: commands.Context, argument: str) -> ST:
         """Converter which searches for and returns the first track.
 
         Used as a type hint in a nextcord.py command.
         """
+        if argument.startswith('local:'):
+            argument.replace('local:', '')
+
         results = await cls.search(argument)
 
         if not results:
@@ -234,74 +218,32 @@ class Playable(metaclass=abc.ABCMeta):
         return results[0]
 
 
-class GenericTrack(Playable):
-    """Generic Wavelink Track.
+class YouTubeTrack(SearchableTrack):
+    """A track created using a search to YouTube."""
 
-    Use this track for searching for Local songs or direct URLs.
-    """
-    ...
-
-
-class YouTubeTrack(Playable):
-
-    PREFIX: str = 'ytsearch:'
+    _search_type: ClassVar[str] = "ytsearch"
 
     @property
     def thumbnail(self) -> str:
-        """The URL to the thumbnail of this video.
-
-        .. note::
-
-            Due to YouTube limitations this may not always return a valid thumbnail.
-            Use :func:`.fetch_thumbnail` to fallback.
-
-        Returns
-        -------
-        str
-            The URL to the video thumbnail.
-        """
+        """The URL to the thumbnail of this video."""
         return f"https://img.youtube.com/vi/{self.identifier}/maxresdefault.jpg"
 
     thumb = thumbnail
-
-    async def fetch_thumbnail(self, *, node: Node | None = None) -> str:
-        """Fetch the max resolution thumbnail with a fallback if it does not exist.
-
-        .. note::
-
-            This method uses an API request to fetch the thumbnail.
-
-        Returns
-        -------
-        str
-            The URL to the video thumbnail.
-        """
-        if not node:
-            node = NodePool.get_node()
-
-        session: aiohttp.ClientSession = node._session
-        url: str = f"https://img.youtube.com/vi/{self.identifier}/maxresdefault.jpg"
-
-        async with session.get(url=url) as resp:
-            if resp.status == 404:
-                url = f'https://img.youtube.com/vi/{self.identifier}/hqdefault.jpg'
-
-        return url
 
 
 class YouTubeMusicTrack(YouTubeTrack):
     """A track created using a search to YouTube Music."""
 
-    PREFIX: str = "ytmsearch:"
+    _search_type: ClassVar[str] = "ytmsearch"
 
 
-class SoundCloudTrack(Playable):
+class SoundCloudTrack(SearchableTrack):
     """A track created using a search to SoundCloud."""
 
-    PREFIX: str = "scsearch:"
+    _search_type: ClassVar[str] = "scsearch"
 
 
-class YouTubePlaylist(Playable, Playlist):
+class YouTubePlaylist(SearchableTrack, Playlist):
     """Represents a Lavalink YouTube playlist object.
 
     Attributes
@@ -314,10 +256,10 @@ class YouTubePlaylist(Playable, Playlist):
         The selected video in the playlist. This could be ``None``.
     """
 
-    PREFIX: str = "ytpl:"
+    _search_type: ClassVar[str] = "ytpl"
 
     def __init__(self, data: dict):
-        self.tracks: list[YouTubeTrack] = []
+        self.tracks: List[YouTubeTrack] = []
         self.name: str = data["playlistInfo"]["name"]
 
         self.selected_track: Optional[int] = data["playlistInfo"].get("selectedTrack")
@@ -325,8 +267,59 @@ class YouTubePlaylist(Playable, Playlist):
             self.selected_track = int(self.selected_track)
 
         for track_data in data["tracks"]:
-            track = YouTubeTrack(track_data)
+            track = YouTubeTrack(track_data["track"], track_data["info"])
             self.tracks.append(track)
 
     def __str__(self) -> str:
         return self.name
+
+
+class LocalTrack(SearchableTrack):
+    """Represents a Lavalinkl Local Track Object."""
+
+    _search_type: ClassVar[str] = 'local'
+
+
+class PartialTrack(Searchable, Playable):
+    """A PartialTrack object that searches for the given query at playtime.
+
+    Parameters
+    ----------
+    query: str
+        The query to search for at playtime.
+    node: Optional[:class:`wavelink.Node`]
+        An optional node to use when searching. Defaults to the best node.
+    cls: Optional[:class:`SearchableTrack`]
+        An optional Non-Partial Track object to use when searching.
+
+
+    .. warning::
+
+        This object will only search for the given query at playtime.
+        Full track information will be missing until it has been searched.
+    """
+
+    def __init__(self,
+                 *,
+                 query: str,
+                 node: Optional[Node] = MISSING,
+                 cls: Optional[SearchableTrack] = YouTubeTrack):
+        self.query = query
+        self.title = query
+        self._node = node
+        self._cls = cls
+
+        if not issubclass(cls, SearchableTrack):
+            raise TypeError(f"cls parameter must be of type {SearchableTrack!r} not {cls!r}")
+
+    async def _search(self):
+        node = self._node
+        if node is MISSING:
+            node = NodePool.get_node()
+
+        tracks = await self._cls.search(query=self.query, node=node)
+
+        return tracks[0]
+
+    async def search(self):
+        raise NotImplementedError

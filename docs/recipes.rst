@@ -1,15 +1,15 @@
 Recipes and Examples
 =============================
-Below are common short examples and recipes for use with WaveLink 2.
-This is not an exhaustive list, for more detailed examples, see: `GitHub Examples <https://github.com/PythonistaGuild/Wavelink/tree/main/examples>`_
+Below are common short examples and recipes for use with WaveLink 1.0.
+This is not an exhaustive list, for more detailed examples, see: `GitHub Examples <https://github.com/PythonistaGuild/Wavelink/tree/1.0/examples>`_
 
 
 Listening to Events
 -------------------
-WaveLink 2 makes use of the built in event dispatcher of Discord.py.
+WaveLink 1.0 makes use of the built in event dispatcher of Discord.py.
 This means you can listen to WaveLink events the same way you listen to discord.py events.
 
-*All WaveLink events are prefixed with ``on_wavelink_``*
+*All WaveLink events are prefixed with `on_wavelink_`*
 
 
 **Outside of a Cog:**
@@ -17,7 +17,7 @@ This means you can listen to WaveLink events the same way you listen to discord.
 .. code:: python3
 
     @bot.event
-    async def on_wavelink_node_ready(node: Node) -> None:
+    async def on_wavelink_node_ready(node: Node):
         print(f"Node {node.id} is ready!")
 
 
@@ -26,14 +26,14 @@ This means you can listen to WaveLink events the same way you listen to discord.
 .. code:: python3
 
     @commands.Cog.listener()
-    async def on_wavelink_node_ready(self, node: Node) -> None:
+    async def on_wavelink_node_ready(node: Node):
         print(f"Node {node.id} is ready!")
 
 
 
 Creating and using Nodes
 ------------------------
-Wavelink 2 has a more intuitive way of creating and storing Nodes.
+Wavelink 1.0 has a more intuitive way of creating and storing Nodes.
 Nodes are now stored at class level in a `NodePool`. Once a node has been created, you can access that node anywhere that
 wavelink can be imported.
 
@@ -45,8 +45,11 @@ wavelink can be imported.
     # Creating a node is as simple as this...
     # The node will be automatically stored to the global NodePool...
     # You can create as many nodes as you like, most people only need 1...
-    node: wavelink.Node = wavelink.Node(uri='http://localhost:2333', password='youshallnotpass')
-    await wavelink.NodePool.connect(client=bot, nodes=[node])
+
+    await wavelink.NodePool.create_node(bot=bot,
+                                        host='0.0.0.0',
+                                        port=2333,
+                                        password='YOUR_LAVALINK_PASSWORD')
 
 
 **Accessing the best Node from the NodePool:**
@@ -61,14 +64,13 @@ wavelink can be imported.
 
 .. code:: python3
 
-    node = wavelink.NodePool.get_node(id="MY_NODE_ID")
+    node = wavelink.NodePool.get_node(identifier="MY_NODE_ID")
 
 
 **Accessing a list of Players a Node contains:**
 
 .. code:: python3
 
-    # A mapping of Guild ID to Player.
     node = wavelink.NodePool.get_node()
     print(node.players)
 
@@ -80,31 +82,37 @@ wavelink can be imported.
     from wavelink.ext import spotify
 
 
-    sc = spotify.SpotifyClient(
-        client_id='CLIENT_ID',
-        client_secret='SECRET'
-    )
-    node: wavelink.Node = wavelink.Node(uri='http://localhost:2333', password='youshallnotpass')
-    await wavelink.NodePool.connect(client=self, nodes=[node], spotify=sc)
+    node = await wavelink.NodePool.create_node(bot=bot,
+                                               host='0.0.0.0',
+                                               port=2333,
+                                               password='YOUR_LAVALINK_PASSWORD',
+                                               spotify_client=spotify.SpotifyClient(client_id=..., client_secret=...))
 
 
 Searching Tracks
 ----------------
-Below are some common recipes for searching tracks.
+The way you search for tracks in WaveLink 1.0 is different. Below are some common recipes for searching tracks.
 
 
 **A Simple YouTube search:**
 
 .. code:: python3
 
-    track = await wavelink.YouTubeTrack.search("Ocean Drive", return_first=True)
+    track = await wavelink.YouTubeTrack.search(query="Ocean Drive", return_first=True)
 
 
 **Returning more than one result:**
 
 .. code:: python3
 
-    tracks = await wavelink.YouTubeTrack.search("Ocean Drive")
+    tracks = await wavelink.YouTubeTrack.search(query="Ocean Drive")
+
+
+**SoundCloud search:**
+
+.. code:: python3
+
+    tracks = await wavelink.SoundCloudTrack.search(query=...)
 
 
 **As a Discord.py converter:**
@@ -117,9 +125,57 @@ Below are some common recipes for searching tracks.
         ...
 
 
+**Union converter:**
+
+.. code:: python3
+
+    @commands.command()
+    async def play(self, ctx: commands.Context, *, track: typing.Union[wavelink.SoundCloudTrack, wavelink.YouTubeTrack]):
+        # The track will be the first result from what you searched when invoking the command...
+        # If no soundcloud track is found, YouTube will be searched...
+        ...
+
+
+Partial Tracks
+--------------
+PartialTrack is a new way to search in WaveLink 1.0. Partial tracks are most useful when used together with the Spotify Ext.
+A `PartialTrack` allows you to queue a song that will only actually be searched for and result at play time.
+
+This behaviour allows queuing large amounts of tracks without querying the REST API continuously.
+
+
+**A basic PartialTrack search:**
+
+.. code:: python3
+
+    @commands.command()
+    async def play(self, ctx: commands.Context, *, search: str):
+        partial = wavelink.PartialTrack(query=search, cls=wavelink.YouTubeTrack)
+
+        track = await ctx.voice_client.play(partial)
+        await ctx.send(f'**Now playing:** `{track.title}`')
+
+
+**PartialTracks' with Spotify:**
+
+.. code-block:: python3
+
+    # Partial tracks makes queueing large playlists or albums super fast...
+    # Partial tracks only have limited information until they are played...
+
+    @commands.command()
+    async def play(self, ctx: commands.Context, *, spotify_url: str):
+
+        async for partial in spotify.SpotifyTrack.iterator(query=spotify_url, partial_tracks=True):
+            player.queue.put(partial)
+
+        ...
+
+
 Creating Players and VoiceProtocol
 ----------------------------------
-Below are some common examples of how to use the new VoiceProtocol with WaveLink.
+WaveLink 1.0 was reworked to revolve around Discord.py's new VoiceProtocol. What this means is that accessing your `Player` instance,
+is easier and more intuitive. Below are some common examples of how to use the new VoiceProtocol with WaveLink.
 
 
 **A Simple Player:**
@@ -204,24 +260,23 @@ Below are some common examples of how to use the new VoiceProtocol with WaveLink
     # Could return None, if the Player was not found...
 
     node = wavelink.NodePool.get_node()
-    player = node.get_player(ctx.guild.id)
+    player = node.get_player(ctx.guild)
+
+
+Spotify
+-------
+See: `Spotify Documentation <https://wavelink.readthedocs.io/en/1.0/exts/spotify.html>`_
 
 
 Common Operations
 -----------------
-Below are some common operations used with WaveLink.
+Below are some common operations used with WaveLink. Most WaveLink 1.0 operations are the same as stable release.
 See the documentation for more info.
 
 .. code:: python3
 
     # Play a track...
     await player.play(track)
-
-    # Turn AutoPlay on...
-    player.autoplay = True
-
-    # Similarly turn AutoPlay off...
-    player.autoplay = False
 
     # Pause the current song...
     await player.pause()
@@ -241,27 +296,37 @@ See the documentation for more info.
     # Set the player volume...
     await player.set_volume(30)
 
-    # Seek the currently playing song (position is an integer of milliseconds)...
+    # Seek the currently playing song (position is an integer of seconds)...
     await player.seek(position)
 
     # Check if the player is playing...
     player.is_playing()
 
+    # Check if the player is connected...
+    player.is_connected()
+
     # Check if the player is paused...
     player.is_paused()
 
-    # Get the best connected node...
-    node = wavelink.NodePool.get_connected_node()
+    # Get the best node...
+    node = wavelink.NodePool.get_node()
+
+    # Build a track from the unique track base64 identifier...
+    await node.build_track(cls=wavelink.YouTubeTrack, identifier="UNIQUE_BASE64_TRACK_IDENTIFIER")
+
+    # Disconnect and cleanup a node and all it's current players...
+    await node.disconnect()
 
     # Common node properties...
-    node.uri
-    node.id
+    node.host
+    node.port
+    node.region
+    node.identifier
     node.players
-    node.status
+    node.is_connected()
 
     # Common player properties...
-    player.queue  # The players inbuilt queue...
-    player.guild  # The guild associated with the player...
-    player.current  # The currently playing song...
-    player.position  # The currently playing songs position in milliseconds...
-    player.ping  # The ping of this current player...
+    player.guild
+    player.user  # The players bot/client instance...
+    player.source  # The currently playing song...
+    player.position  # The currently playing songs position in seconds...

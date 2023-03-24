@@ -1,7 +1,6 @@
-"""
-MIT License
+"""MIT License
 
-Copyright (c) 2019-Present PythonistaGuild
+Copyright (c) 2019-2021 PythonistaGuild
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -25,222 +24,201 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Dict, TYPE_CHECKING, Tuple, Optional
 
 import aiohttp
 
 import wavelink
-
-from . import __version__
-from .backoff import Backoff
-from .enums import NodeStatus, TrackEventType
-from .exceptions import *
-from .payloads import TrackEventPayload
+from .utils import MISSING
 
 if TYPE_CHECKING:
-    from .node import Node
-    from .player import Player
+    from .pool import Node
 
+__all__ = ("Websocket",)
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
 class Websocket:
-
-    __slots__ = (
-        'node',
-        'socket',
-        'retries',
-        'retry',
-        '_original_attempts',
-        'backoff',
-        '_listener_task'
-    )
-
-    def __init__(self, *, node: Node) -> None:
+    def __init__(self, *, node: Node, session: aiohttp.ClientSession = MISSING):
         self.node: Node = node
-        self.socket: aiohttp.ClientWebSocketResponse | None = None
 
-        self.retries: int | None = node._retries
-        self.retry: float = 1
-        self._original_attempts: int | None = node._retries
+        self.websocket: Optional[aiohttp.ClientWebSocketResponse] = None
+        if session is MISSING:
+            session = aiohttp.ClientSession()
+        self.session: aiohttp.ClientSession = session
+        self.listener: Optional[asyncio.Task] = None
 
-        self.backoff: Backoff = Backoff()
-
-        self._listener_task: asyncio.Task | None = None
+        self.host: str = f'{"https://" if self.node._https else "http://"}{self.node.host}:{self.node.port}'
+        self.ws_host: str = f"ws://{self.node.host}:{self.node.port}"
 
     @property
-    def headers(self) -> dict[str, str]:
-        assert self.node.client is not None
-        assert self.node.client.user is not None
-
+    def headers(self) -> Dict[str, Any]:
         return {
-            'Authorization': self.node.password,
-            'User-Id': str(self.node.client.user.id),
-            'Client-Name': f'Wavelink/{__version__}'
+            "Authorization": self.node._password,
+            "User-Id": str(self.node.bot.user.id),
+            "Client-Name": "WaveLink",
+            'Resume-Key': self.node.resume_key
         }
 
     def is_connected(self) -> bool:
-        return self.socket is not None and not self.socket.closed
+        return self.websocket is not None and not self.websocket.closed
 
     async def connect(self) -> None:
-        if self.node.status is NodeStatus.CONNECTED:
-            logger.error(f'The Node <{self.node!r}> is already in a connected state. Disregarding.')
+        if self.is_connected():
+            assert isinstance(self.websocket, aiohttp.ClientWebSocketResponse)
+            await self.websocket.close(
+                code=1006, message=b"WaveLink: Attempting reconnection."
+            )
+
+        host = self.host if self.node._https else self.ws_host
+
+        try:
+            self.websocket = await self.session.ws_connect(
+                host, headers=self.headers, heartbeat=self.node._heartbeat
+            )
+        except Exception as error:
+            if (
+                isinstance(error, aiohttp.WSServerHandshakeError)
+                and error.status == 401
+            ):
+                logger.error(f"\nAuthorization Failed for Node: {self.node}\n")
+            else:
+                logger.error(f"Connection Failure: {error}")
+
             return
 
-        self.node._status = NodeStatus.CONNECTING
-
-        try:
-            self._listener_task.cancel()
-        except Exception as e:
-            logger.debug(f'An error was raised while cancelling the websocket listener. {e}')
-
-        uri: str = self.node._host.removeprefix('https://').removeprefix('http://')
-
-        if self.node._use_http:
-            uri: str = f'{"https://" if self.node._secure else "http://"}{uri}'
-        else:
-            uri: str = f'{"wss://" if self.node._secure else "ws://"}{uri}'
-
-        heartbeat: float = self.node.heartbeat
-
-        try:
-            self.socket = await self.node._session.ws_connect(url=uri, heartbeat=heartbeat, headers=self.headers)
-        except Exception as e:
-            if isinstance(e, aiohttp.WSServerHandshakeError) and e.status == 401:
-                raise AuthorizationFailed from e
-            else:
-                logger.error(f'An error occurred connecting to node: "{self.node}". {e}')
+        if self.listener is None:
+            self.listener = asyncio.create_task(self.listen())
 
         if self.is_connected():
-            self.retries = self._original_attempts
-            # TODO - Configure Resuming...
-        else:
-            await self._reconnect()
-            return
+            self.dispatch("node_ready", self.node)
+            logger.debug(f"Connection established...{self.node.__repr__()}")
 
-        self._listener_task = asyncio.create_task(self._listen())
+            resume = {
+                "op": "configureResuming",
+                "key": f"{self.node.resume_key}",
+                "timeout": 60
+            }
+            await self.send(**resume)
 
-    async def _reconnect(self) -> None:
-        self.node._status = NodeStatus.CONNECTING
-        self.retry = self.backoff.calculate()
+    async def listen(self) -> None:
+        backoff = wavelink.Backoff(base=1, maximum_time=60, maximum_tries=None)
 
-        if self.retries == 0:
-            logger.error('Wavelink 2.0 was unable to connect, and has exhausted the reconnection attempt limit. '
-                         'Please check your Lavalink Node is started and your connection details are correct.')
-
-            await self.cleanup()
-            return
-
-        retries = f'{self.retries} attempt(s) remaining.' if self.retries else ''
-        logger.error(f'Wavelink 2.0 was unable to connect, retrying connection in: "{self.retry}" seconds. {retries}')
-
-        if self.retries:
-            self.retries -= 1
-
-        await asyncio.sleep(self.retry)
-        await self.connect()
-
-    async def _listen(self) -> None:
         while True:
-            message = await self.socket.receive()
+            assert isinstance(self.websocket, aiohttp.ClientWebSocketResponse)
+            msg = await self.websocket.receive()
 
-            if message.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING):
+            if msg.type is aiohttp.WSMsgType.CLOSED:
+                logger.debug(f"Websocket Closed: {msg.extra}")
 
-                for player in self.node.players.copy().values():
-                    await player._update_event(data=None)
+                retry = backoff.calculate()
 
-                asyncio.create_task(self._reconnect())
-                return
+                logger.warning(f"\nRetrying connection in <{retry}> seconds...\n")
 
-            if message.data == 1011:
-                logger.error('Lavalink encountered an internal error which can not be resolved. '
-                             'Make sure your Lavalink sever is up to date, and try restarting.')
+                await asyncio.sleep(retry)
 
-                await self.cleanup()
-                return
-
-            if message.data is None:
-                logger.info('Received a message from Lavalink with empty data. Disregarding.')
-                continue
-
-            data = message.json()
-            logger.debug(f'Received a message from Lavalink: {data}')
-
-            op = data.get('op', None)
-            if not op:
-                logger.info('Message "op" from Lavalink was None. Disregarding.')
-                continue
-
-            if op == 'ready':
-                self.node._status = NodeStatus.CONNECTED
-                self.node._session_id = data['sessionId']
-
-                self.dispatch('node_ready', self.node)
-
-            elif op == 'stats':
-                payload = ...
-                logger.debug(f'Stats Update: {data}')
-                self.dispatch('stats_update', data)
-
-            elif op == 'event':
-                logger.debug(f'Websocket Event: {data}')
-                player = self.get_player(data)
-
-                if player is None:
-                    logger.debug('Received payload from Lavalink without an attached player. Disregarding.')
-                    continue
-
-                if data['type'] == 'WebSocketClosedEvent':
-                    if data['code'] == 4014:
-                        continue
-
-                track = await self.node.build_track(cls=wavelink.GenericTrack, encoded=data['encodedTrack'])
-                payload: TrackEventPayload = TrackEventPayload(data=data, track=track, player=player)
-
-                if payload.event is TrackEventType.END and payload.reason != 'REPLACED':
-                    player._current = None
-
-                self.dispatch('track_event', payload)
-
-                if payload.event is TrackEventType.END:
-                    self.dispatch('track_end', payload)
-                    asyncio.create_task(player._auto_play_event(payload))
-
-                elif payload.event is TrackEventType.START:
-                    self.dispatch('track_start', payload)
-
-            elif op == 'playerUpdate':
-                player = self.get_player(data)
-                if player is None:
-                    logger.debug('Received payload from Lavalink without an attached player. Disregarding.')
-                    continue
-
-                await player._update_event(data)
-                self.dispatch("player_update", data)
-                logger.debug(f'Websocket Player Update: {data}')
-
+                if not self.is_connected():
+                    await self.connect()
             else:
-                logger.info(f'Received unknown payload from Lavalink: <{data}>. '
-                            f'If this continues consider making a ticket on the Wavelink GitHub. '
-                            f'https://github.com/PythonistaGuild/Wavelink')
+                logger.debug(f"Received Payload:: <{msg.data}>")
 
-    def get_player(self, payload: dict[str, Any]) -> Optional['Player']:
-        return self.node.players.get(int(payload['guildId']), None)
+                if msg.data == 1011:
+                    # Lavalink encountered an internal error which can not be fixed...
+                    # Consider updating Lavalink...
+                    logger.error('Internal Lavalink Error encountered. Terminating WaveLink without retries.'
+                                 'Consider updating your Lavalink Server.')
+
+                    self.listener.cancel()
+                    return
+
+                asyncio.create_task(self.process_data(msg.json()))
+
+    async def process_data(self, data: Dict[str, Any]) -> None:
+        op = data.get("op", None)
+        if not op:
+            return
+
+        if op == "stats":
+            self.node.stats = wavelink.Stats(self.node, data)
+            return
+
+        try:
+            player = self.node.get_player(self.node.bot.get_guild(
+                int(data["guildId"])))  # type: ignore
+        except KeyError:
+            return
+
+        if player is None:
+            return
+
+        if op == 'event':
+            event, payload = await self._get_event_payload(data['type'], data)
+            logger.debug(f'op: event:: {data}')
+            
+            if event == 'track_end' and payload.get('reason') != 'REPLACED':
+                player._source = None
+
+            self.dispatch(event, player, **payload)
+
+        elif op == "playerUpdate":
+            logger.debug(f"op: playerUpdate:: {data}")
+            try:
+                await player.update_state(data)
+            except KeyError:
+                pass
+
+    async def _get_event_payload(
+        self, name: str, data: Dict[str, Any]
+    ) -> Tuple[str, Dict[str, Any]]:
+        event = "event"
+        payload = {}
+
+        if name == "WebSocketClosedEvent":
+            event = "websocket_closed"
+            payload["reason"] = data.get("reason")
+            payload["code"] = data.get("code")
+
+        if name.startswith("Track"):
+            base64_ = data.get('track')
+            track = await self.node.build_track(cls=wavelink.Track, identifier=base64_)
+
+            payload["track"] = track
+
+            if name == "TrackEndEvent":
+                event = "track_end"
+                payload["reason"] = data.get("reason")
+
+            elif name == "TrackStartEvent":
+                event = "track_start"
+
+            elif name == "TrackExceptionEvent":
+                event = "track_exception"
+                payload["error"] = data.get("error")
+
+            elif name == "TrackStuckEvent":
+                event = "track_stuck"
+                threshold = data.get("thresholdMs")
+                if isinstance(threshold, str):
+                    payload["threshold"] = int(threshold)
+
+        return event, payload
 
     def dispatch(self, event, *args: Any, **kwargs: Any) -> None:
-        self.node.client.dispatch(f"wavelink_{event}", *args, **kwargs)
+        self.node.bot.dispatch(f"wavelink_{event}", *args, **kwargs)
 
-    # noinspection PyBroadException
-    async def cleanup(self) -> None:
-        try:
-            await self.socket.close()
-        except AttributeError:
-            pass
+    async def send(self, **data: Any) -> None:
+        if self.is_connected():
+            assert isinstance(self.websocket, aiohttp.ClientWebSocketResponse)
+            logger.debug(f"Sending Payload:: {data}")
 
-        try:
-            self._listener_task.cancel()
-        except Exception:
-            pass
+            data_str = self.node._dumps(data)
+            if isinstance(data_str, bytes):
+                # Some JSON libraries serialize to bytes
+                # Yet Lavalink does not support binary websockets
+                # So we need to decode. In the future, maybe
+                # self._websocket.send_bytes could be used
+                # if Lavalink ever implements it
+                data_str = data_str.decode("utf-8")
 
-        self.node._status = NodeStatus.DISCONNECTED
+            await self.websocket.send_str(data_str)
